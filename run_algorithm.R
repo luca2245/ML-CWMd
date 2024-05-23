@@ -55,7 +55,7 @@ log_ll <- if_else(log_ll == 0, -Inf, log_ll)
 fitting <- fitting_rec[[which.max(log_ll)]]
 
 # Run the algorithm with N k-means initializations
-N <- 10
+N <- 1
 log_ll <- vector(mode="numeric", length = N)
 fitting_rec <- list()
 
