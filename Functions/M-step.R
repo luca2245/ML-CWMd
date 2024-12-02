@@ -1,5 +1,5 @@
 # M-step Function with EstimateIsing
-M_step_EI <- function(formula,U,V = NULL,D = NULL,data,C,z,params){
+M_step_EI <- function(formula, U = NULL, V = NULL, D = NULL, data, C, z, params){
   
   list2env(params, env = environment())
   new_params = list()
@@ -10,16 +10,22 @@ M_step_EI <- function(formula,U,V = NULL,D = NULL,data,C,z,params){
   new_params$w <- w
   
   #Update Parameters related to U
-  mu = t(as.matrix(z)) %*% as.matrix(U)
-  mu = array(t(mu / sum_z), dim=c(1, dim(U)[2], C))
-  for (c in 1:C){
-    j = as.matrix(U - matrix(mu[,,c],nrow=dim(U)[1],ncol=dim(U)[2],byrow=T))
-    s = mymult3(z[,c],j,U)
-    s = s / sum_z[c]
-    sigma[,,c] = s
+  if( length(U) != 0){
+    U <- data.frame(U) #
+    mu = t(as.matrix(z)) %*% as.matrix(U)
+    mu = array(t(mu / sum_z), dim=c(1, dim(U)[2], C))
+    if(dim(U)[2] == 1){
+      mu<- array(mu, dim = c(1, 1, C)) #
+    }
+    for (c in 1:C){
+      j = as.matrix(U - matrix(mu[,,c],nrow=dim(U)[1],ncol=dim(U)[2],byrow=T))
+      s = mymult3(z[,c],j,U)
+      s = s / sum_z[c]
+      sigma[,,c] = s
+    }
+    new_params$mu <- mu
+    new_params$sigma <- sigma
   }
-  new_params$mu <- mu
-  new_params$sigma <- sigma
   
   #Update Parameters related to V
   if( length(V) != 0){
@@ -59,7 +65,7 @@ M_step_EI <- function(formula,U,V = NULL,D = NULL,data,C,z,params){
 
 
 # M-step Function with IsingFit
-M_step_IF <- function(formula,U,V = NULL,D = NULL,data,C,z,params){
+M_step_IF <- function(formula, U = NULL, V = NULL, D = NULL, data, C, z, params){
   
   list2env(params, env = environment())
   new_params = list()
@@ -70,16 +76,22 @@ M_step_IF <- function(formula,U,V = NULL,D = NULL,data,C,z,params){
   new_params$w <- w
   
   #Update Parameters related to U
-  mu = t(as.matrix(z)) %*% as.matrix(U)
-  mu = array(t(mu / sum_z), dim=c(1, dim(U)[2], C))
-  for (c in 1:C){
-    j = as.matrix(U - matrix(mu[,,c],nrow=dim(U)[1],ncol=dim(U)[2],byrow=T))
-    s = mymult3(z[,c],j,U)
-    s = s / sum_z[c]
-    sigma[,,c] = s
+  if( length(U) != 0){
+    U <- data.frame(U) #
+    mu = t(as.matrix(z)) %*% as.matrix(U)
+    mu = array(t(mu / sum_z), dim=c(1, dim(U)[2], C))
+    if(dim(U)[2] == 1){
+      mu<- array(mu, dim = c(1, 1, C)) #
+    }
+    for (c in 1:C){
+      j = as.matrix(U - matrix(mu[,,c],nrow=dim(U)[1],ncol=dim(U)[2],byrow=T))
+      s = mymult3(z[,c],j,U)
+      s = s / sum_z[c]
+      sigma[,,c] = s
+    }
+    new_params$mu <- mu
+    new_params$sigma <- sigma
   }
-  new_params$mu <- mu
-  new_params$sigma <- sigma
   
   #Update Parameters related to V
   if( length(V) != 0){

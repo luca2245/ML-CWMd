@@ -1,13 +1,23 @@
 # E-step Function
 
-E_step <- function(Y,U,V = NULL,D = NULL,C,params){
+E_step <- function(Y, U = NULL, V = NULL, D = NULL, C, params){
   list2env(params, env = environment())
+  if( length(U) != 0){
+    cont_density <- list()
+    for(i in 1:C){
+      cont_density[[i]] <- dmvnorm(U, mean = mu[,,i], sigma = sigma[,,i],log = 1)
+    }
+  }
+  else{
+    cont_density <- rep(0,C)
+  }
+  
   v <- length(V)
   if( length(D) != 0){
     dich_density <- list()
     for(i in 1:C){
       dich_density[[i]] <- log(apply(D, 1, function(row) IsingStateProb(row, 
-                                                                        int[,,i], thres[,,i], beta = 1, responses = c(0L, 1L))))  
+                          int[,,i], thres[,,i], beta = 1, responses = c(0L, 1L))))  
     }
   }
   else{
@@ -23,10 +33,10 @@ E_step <- function(Y,U,V = NULL,D = NULL,C,params){
     multinom_density <- rep(0,C)
   }
   
-  z = matrix(0, nrow = dim(U)[1], ncol = C)
+  z = matrix(0, nrow = length(Y), ncol = C)
   for(i in 1:C){
     z[, i] = exp( log(w[i]) + cross_log(fitted_values[,,i],Y) +
-                    dmvnorm(U, mean = mu[,,i], sigma = sigma[,,i],log = 1) +
+                    + cont_density[[i]]  +
                     + multinom_density[[i]] +
                     dich_density[[i]]  )
   }

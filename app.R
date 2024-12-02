@@ -582,17 +582,36 @@ server <- function(input, output, session) {
   C <-  NULL
   mydata <-  NULL
   
+  log <- reactiveVal("") 
+  
   observeEvent(input$runAlgorithm, {
-    Calculate_BIC <- function(U, V = NULL, D = NULL, log_l, C, fixed_intercept = FALSE){
-      N = dim(U)[1]
-      p = dim(U)[2]
-      l = dim(D)[2]
-      k_r = unlist(purrr::map(V, ~dim(.)[2]))
-      
+    
+    Calculate_BIC <- function(formula, data, U = NULL, V = NULL, D = NULL, log_l, C, fixed_intercept = FALSE){
+      N = dim(data)[1]
       k_weights = C - 1
-      k_cont = p*(p+3)/2
-      k_cat = sum(k_r)
-      k_dich = l*(l+1)/2
+      
+      if(!is.null(U)){
+        U <- data.frame(U)
+        p = dim(U)[2]
+        k_cont = p*(p+3)/2
+      } else{
+        k_cont <- 0
+      }
+      
+      if(!is.null(V)){
+        k_r = unlist(purrr::map(V, ~dim(.)[2]))
+        k_cat = sum(k_r)
+      } else{
+        k_cat <- 0
+      }
+      
+      if(!is.null(D)){
+        l = dim(D)[2]
+        k_dich = l*(l+1)/2
+      } else{
+        k_dich <- 0
+      }
+      
       k_reg = length(attr(terms(formula), "term.labels")) + ifelse(fixed_intercept == TRUE, 1, 0)
       
       k = C*(k_cont + k_cat + k_dich + k_reg) + k_weights
@@ -602,24 +621,82 @@ server <- function(input, output, session) {
       
     }
     
-    Algo_full <- function(data,C,U,V = NULL,D = NULL, flag_init = TRUE, flag_mstep = TRUE){
+    fitMLCWMd <- function(data, formula, C, cont_var = NULL, cat_var = NULL, dich_dep_var = NULL, 
+                          init, cluster = NULL, mstep_isingfit = FALSE, 
+                          fixed_intercept = TRUE,
+                          max_it = 30, tol = 1e-6){
+      
+      # Process variables
+      if(length(cont_var) != 0){
+        missing_cont_var <- setdiff(cont_var, colnames(data))
+        if(length(missing_cont_var) == 0){
+          U <- data[ , cont_var]
+        } else{
+          return("At least one continuous variable provided is not in the data")
+        }
+      } else{
+        U <- NULL
+      }
+      
+      if(length(cat_var) != 0){
+        missing_cat_var <- setdiff(cat_var, colnames(data))
+        if(length(missing_cat_var) == 0 ){
+          cat_names_list <- list()
+          for(i in 1:length(cat_var)){
+            #cat_names_list[[i]] <- paste0(cat_var[i], 1:length( levels( as.factor(data[, cat_var[i]]) ) ) )
+            cat_names_list[[i]] <- paste0(cat_var[i], ".", levels( as.factor(data[, cat_var[i]])  ) )
+          }
+          cat_data <- as.data.frame(data[ , cat_var])
+          colnames(cat_data) <- cat_var
+          cat_data <- as.data.frame(unclass(cat_data),stringsAsFactors = TRUE)
+          onehot_cat_data <- cat_to_onehot(cat_data, cat_var, cat_names_list)
+          V <- list()
+          for(i in 1:length(cat_var)){
+            V[[i]] <- onehot_cat_data[, grep(paste0("^", cat_var[i]), names(onehot_cat_data))]
+          }
+        } else{
+          return("At least one categorical variable provided is not in the data")
+        }
+      } else{
+        V <- NULL
+      } 
+      
+      if(length(dich_dep_var) != 0){
+        missing_dich_dep_var <- setdiff(dich_dep_var, colnames(data))
+        if(length(missing_dich_dep_var) == 0){
+          D <- data[ , dich_dep_var]
+        } else{
+          return("At least one dichotomous dependent variable provided is not in the data")
+        }
+      } else{
+        D <- NULL
+      }
+      
+      Y <- data[ , as.character(formula[[2]])]
+      data <- as.data.frame(unclass(data),stringsAsFactors = TRUE)
+      #return(list(U,V,D))
       
       # Decide Initialization type
-      if(flag_init == T){
+      if(init == "random"){
         params = initialize_params_random(data,U,V,D,formula,C)
-      }
-      else{
+      } else if (init == "kmeans"){
         params = initialize_params_k_means(data,U,V,D,formula,C)
+      } else if (init == "manual"){
+        params = initialize_params_manual(data,cluster,U,V,D,formula,C)
+      } else{
+        stop("Execution stopped. No existing initialization provided")
       }
       
       z <- E_step(Y,U,V,D,C,params)
       log_l <- c(0,log_like(Y,U,V,D,C,z,params))
-      tol = 1e-6
-      while(abs(log_l[length(log_l)] - log_l[length(log_l)-1]) >  tol){
+      tol = tol
+      max_it = max_it
+      n_iter = 0
+      while( ( abs(log_l[length(log_l)] - log_l[length(log_l)-1])  >  tol ) & ( n_iter < max_it ) ){
         # E-step
         z <- E_step(Y,U,V,D,C,params)
         # M-step
-        if(flag_mstep == T){
+        if(mstep_isingfit == FALSE){
           params <- M_step_EI(formula,U,V,D,data,C,z,params)
         }
         else{
@@ -628,10 +705,28 @@ server <- function(input, output, session) {
         #Saving log-likelihood
         new_log_l <- log_like(Y,U,V,D,C,z,params)
         log_l <- c(log_l,new_log_l)
+        n_iter <- n_iter + 1
       }
-      return(list(params = params,log_l = log_l,z = z))
+      model_bic = Calculate_BIC(formula, data, U, V, D, log_l[length(log_l)], C, fixed_intercept = fixed_intercept)
+      
+      if(length(cont_var) != 0){
+        dimnames(params$mu) <- list(NULL, cont_var, NULL)
+        dimnames(params$sigma) <- list(cont_var, cont_var, NULL)
+      } 
+      
+      if(length(cat_var) != 0){
+        for(i in 1:length(cat_var)){
+          dimnames(params$lambda[[i]]) <- list(NULL, cat_names_list[[i]], NULL)
+        }
+      }
+      if(length(dich_dep_var) != 0){
+        dimnames(params$thres) <- list(NULL, dich_dep_var, NULL)
+        dimnames(params$int) <- list(dich_dep_var, dich_dep_var, NULL)
+      }
+      
+      return(list(params = params,log_l = log_l, z = z, bic = model_bic,
+                  data_spez = list(U = U, V = V, D = D)))
     }
-    
     
     selected_continuous_covariates <- input$selectedColumns1
     selected_categorical_covariates <- input$selectedColumns2
@@ -641,51 +736,14 @@ server <- function(input, output, session) {
     selected_grouping_levels <- input$singleColumn1
     
     mydata <- data()
-    U <- mydata[, selected_continuous_covariates]
-    V <- list()
-    for(i in 1:length(selected_categorical_covariates)){
-       temp <- as.data.frame( mclust::unmap(mydata[, selected_categorical_covariates[i]]) )
-       colnames(temp) <- paste0(selected_categorical_covariates[i], 1:dim(temp)[2])
-       var_name = paste0( "V", i)
-       V[[var_name]] <- temp
-    }
-    #V1 <- V[[1]]
-    #V2 <- V[[2]]
-    #cat_data <- do.call(cbind, lapply(paste0("V", 1:length(selected_categorical_covariates)), get))
-    D <- mydata[, selected_binary_dependent_covariates]
-    Y <- mydata[, selected_response_variable]
-    
-    original_formula <- Y ~ (1|level) - 1
-    
-    mydata <- cbind(mydata[, c(selected_response_variable,
-                         selected_grouping_levels, selected_continuous_covariates,
-                         selected_binary_dependent_covariates)])
-
-    for(i in 1:length(selected_categorical_covariates)){
-      mydata <- cbind(mydata, V[[i]])
-    }
-    
-    formula <- Y ~ (1|level) - 1
-    
-    ff <- NULL
-    for(i in 1:length(selected_categorical_covariates)){
-      ff <- c(ff, colnames(V[[i]])[1:(dim(V[[i]])[2] - 1)]  )
-    }
-    
-    ff1 <- subset(selected_fixed_effects, 
-                  !selected_fixed_effects %in% selected_categorical_covariates)
-    
+    original_formula <- y ~ (1|level)
+    formula <- as.formula(paste(selected_response_variable,
+                                "~ (1|", selected_grouping_levels, ")"))
     formula_update <- paste(
       "~ . +",
-      paste(c(ff1, ff), collapse = " + ")
+      paste(selected_fixed_effects, collapse = " + ")
     )
     formula <- update.formula(formula, formula_update)
-    #formula <- Y ~ x1 + x2 + V11 + V12 + V21 + D1 + D2 + D3 + (1|level) - 1
-    
-    v <- length(selected_categorical_covariates)
-    v <<- v
-    d <- length(selected_binary_dependent_covariates)
-    d <<- d
     
     if(nchar(user_text()) == 1){
       C <- as.numeric(user_text())
@@ -695,7 +753,7 @@ server <- function(input, output, session) {
       C_vec <- range_parts[1]:range_parts[2]
     }
     
-    flag_ini <- if_else(user_init() == "Random", TRUE, FALSE)
+    flag_ini <- if_else(user_init() == "Random", "random", "kmeans")
     flag_ini <<- flag_ini
     
     if(nchar(user_text()) == 1){
@@ -704,7 +762,16 @@ server <- function(input, output, session) {
       fitting_rec <- list()
       for(i in 1:N){
         tryCatch({
-          fit <- Algo_full(data = mydata, C = C, U = U, V = V, D = D, flag_init = flag_ini, flag_mstep = F)
+          fit <- fitMLCWMd(data = mydata, formula = formula,
+                           C = C, 
+                           cont_var = selected_continuous_covariates, 
+                           cat_var = selected_categorical_covariates, 
+                           dich_dep_var = selected_binary_dependent_covariates, 
+                           init = flag_ini, 
+                           mstep_isingfit = TRUE, 
+                           fixed_intercept = TRUE,
+                           max_it = 30, 
+                           tol = 1e-6)
           log_ll[i] <- fit$log_l[length(fit$log_l)]
           fitting_rec[[i]] <- fit
         }, error = function(err) {
@@ -719,7 +786,7 @@ server <- function(input, output, session) {
       fit <- fitting_rec[[which.max(log_ll)]]
      
       final_log_l <- fit$log_l[length(fit$log_l)]
-      Bbic <- Calculate_BIC(U = U, V = V, D = D, log_l = final_log_l, C = C, fixed_intercept = F)
+      Bbic <- fit$bic
       fitting <<- fit
       BIC_vec <- Bbic
     }
@@ -729,14 +796,24 @@ server <- function(input, output, session) {
       for(k in 1:length(C_vec)){
         fit_list <- list()
         N <- user_n()
+        cat(paste("Starting running with C =", C_vec[k], "\n \n"))
         log_ll <- vector(mode="numeric", length = N)
         for(i in 1:N){
           tryCatch({
-            fit <- Algo_full(data = mydata, C = C_vec[k], U = U, V = V, D = D, flag_init = flag_ini, flag_mstep = F)
+            fit <-  fitMLCWMd(data = mydata, formula = formula,
+                              C = C_vec[k], 
+                              cont_var = selected_continuous_covariates, 
+                              cat_var = selected_categorical_covariates, 
+                              dich_dep_var = selected_binary_dependent_covariates, 
+                              init = flag_ini, 
+                              mstep_isingfit = TRUE, 
+                              fixed_intercept = TRUE,
+                              max_it = 30, 
+                              tol = 1e-6)
             log_ll[i] <- fit$log_l[length(fit$log_l)]
             fit_list[[i]] <- fit
           }, error = function(err) {
-            cat(paste("Error occurred at index", i,  "for number of clusters C = ", k+1, "|","Error message:", conditionMessage(err), 
+            cat(paste("Error occurred at index", i,  "for number of clusters C = ",  C_vec[k], "|","Error message:", conditionMessage(err), 
                       "\n", "Next Initialization...", "\n \n"))
           }
           )
@@ -744,11 +821,8 @@ server <- function(input, output, session) {
         log_ll <- if_else(log_ll == 0, -Inf, log_ll)
         fitting <- fit_list[[which.max(log_ll)]]
         
-        BIC_vec[k] <- Calculate_BIC(U, V, D, 
-                                       log_l = fitting$log_l[length(fitting$log_l)], C_vec[k], 
-                                       fixed_intercept = FALSE)
+        BIC_vec[k] <- fitting$bic
         saved_fitting[[k]] <- fitting 
-        cat(paste("Starting running with C =", C_vec[k+1], "\n \n"))
       }
       C <- C_vec[which.min(BIC_vec)]
       fitting <<- saved_fitting[[which.min(BIC_vec)]]
@@ -757,11 +831,10 @@ server <- function(input, output, session) {
     
     #fit <- list(params = params,log_l = log_l,z = z)
     #fitting <<- fit
-    U <<- U
-    V <<- V
-    V1 <<- V1
-    V2 <<- V2
-    D <<- D
+    U <<- data.frame(fitting$data_spez$U)
+    V <<- fitting$data_spez$V
+    V1 <<- fitting$data_spez$V[[1]]
+    D <<- fitting$data_spez$D
     C <<- C
     formula <<- formula
     mydata <<- mydata
@@ -793,17 +866,51 @@ server <- function(input, output, session) {
   observeEvent(input$runPrediction, {
     
     # Model Prediction
-    
-    model_pred <- function(fit, U, V = NULL, D = NULL, C, data, new_level = FALSE){
-      v = length(V)
+    predict_MLCWMd <- function(fit, data, C, new_level = FALSE){
+      if(!is.null(fit$params$mu)){
+        U <- data[ , dimnames(fit$params$mu)[[2]] ]
+        cont_term <- list()
+        for(i in 1:C){
+          cont_term[[i]] <- dmvnorm(U, mean = 
+                                      fit$params$mu[,,i], sigma = fit$params$sigma[,,i],log = 1)
+        }
+      }  else{
+        cont_term <- rep(0,C)
+      }
+      
+      if(!is.null(fit$params$lambda)){
+        V <- list()
+        v <- length(fit$params$lambda)
+        for(i in 1:v){
+          temp_var <- sub("\\..*", "", dimnames(fit$params$lambda[[i]])[[2]])[1]
+          temp_data <- as.data.frame(data[, temp_var])
+          colnames(temp_data) <- temp_var
+          V[[i]] <- cat_to_onehot(temp_data, temp_var, list(dimnames(fit$params$lambda[[i]])[[2]]))
+        }
+        multinom_term <- list()
+        for(i in 1:C){
+          multinom_term[[i]] <- all_mydmultinom_log(V,fit$params$lambda,v,i) 
+        } 
+      } else{
+        multinom_term <- rep(0,C)
+      }
+      
+      if(!is.null(fit$params$thres)){
+        D <- data[ , dimnames(fit$params$thres)[[2]]]
+        dich_term <- list()
+        for(i in 1:C){
+          dich_term[[i]] <- log(apply(D, 1, function(row) IsingStateProb(row, 
+                                                                         fit$params$int[,,i], fit$params$thres[,,i], beta = 1, responses = c(0L, 1L))))
+        }
+      } else{
+        dich_term <- rep(0,C)
+      } 
+      
+      
       weights_ = matrix(0, nrow = dim(data)[1], ncol = C)
       for(i in 1:C){
-        weights_[, i] = exp( log(fit$params$w[i]) + dmvnorm(U, mean = 
-                                                              fit$params$mu[,,i], sigma = fit$params$sigma[,,i],log = 1) +
-                               + all_mydmultinom_log(V,fit$params$lambda,v,i)  +
-                               log(apply(D, 1, function(row) IsingStateProb(row, 
-                                                                            fit$params$int[,,i], fit$params$thres[,,i], beta = 1, 
-                                                                            responses = c(0L, 1L)))) ) 
+        weights_[, i] = exp( log(fit$params$w[i]) + cont_term[[i]] +
+                               + multinom_term[[i]] + dich_term[[i]] ) 
         
       }
       y_pred <- 0
@@ -827,43 +934,29 @@ server <- function(input, output, session) {
     
     
     mydata_pred <- data_pred()
-    U <- mydata_pred[, selected_continuous_covariates]
-    V <- list()
-    for(i in 1:length(selected_categorical_covariates)){
-      temp <- as.data.frame( mclust::unmap(mydata_pred[, selected_categorical_covariates[i]]) )
-      colnames(temp) <- paste0(selected_categorical_covariates[i], 1:dim(temp)[2])
-      var_name = paste0( "V", i)
-      V[[var_name]] <- temp
-    }
-    
-    D <- mydata_pred[, selected_binary_dependent_covariates]
-    u <- dim(U)[2]
-    v <- length(selected_categorical_covariates)
-    d <- length(selected_binary_dependent_covariates)
-    
-    mydata_pred <- cbind(mydata_pred[, c(
-                               selected_grouping_levels, selected_continuous_covariates,
-                               selected_binary_dependent_covariates)])
-    tt = colnames(mydata_pred)
-    mydata_pred2 <- mydata_pred
-    for(i in 1:length(selected_categorical_covariates)){
-      mydata_pred2 <- cbind(mydata_pred2, mclust::map(V[[i]])  )
-    }
-    colnames(mydata_pred2) <- c(tt, selected_categorical_covariates)
-    
-    for(i in 1:length(selected_categorical_covariates)){
-      mydata_pred <- cbind(mydata_pred, V[[i]])
-    }
-    
-    yy_pred <- model_pred(fitting, U = U, V = V, D = D, C = C, data = mydata_pred, new_level = FALSE)
-    
+    yy_pred <- predict_MLCWMd(fitting, mydata_pred, C, new_level = FALSE)
     yy_pred <<- yy_pred
     mydata_pred <<- mydata_pred
     
+    if(!is.null(fitting$params$mu)){
+      u <- length(names(fitting$params$mu[,,1]))
+    } else{
+      u <- 0
+    }
+    if(!is.null(fitting$params$thres)){
+      d <- length(names(fitting$params$thres[,,1]))
+    } else{
+      d <- 0
+    }
+    if(!is.null(fitting$params$lambda)){
+      v <- length(fitting$params$lambda)
+    } else{
+      v <- 0
+    }
     output$tablepred <- renderText({
       N <- length(yy_pred)
       border_string <- "font-family: cursive; border-bottom: 2px solid;border-top: 2px solid;border-left: 2px solid;border-right: 2px solid;"
-      ff = as.matrix( cbind("New" = 1:N, Prediction = round(yy_pred,2), mydata_pred2 ) )
+      ff = as.matrix( cbind("New" = 1:N, Prediction = round(yy_pred,2), mydata_pred ) )
       cn <- colnames(ff)
       colnames(ff) <- NULL
       ff %>% kbl(align = c("c", "c","c", "c","c", "c","c", "c","c", "c","c","c", "c","c", "c","c")) %>%
@@ -871,8 +964,8 @@ server <- function(input, output, session) {
         row_spec(seq(1,length(yy_pred)), extra_css = "border-bottom: 2px solid;") %>%
         column_spec(2, background = "#42B3FF") %>%
         column_spec(1, background = alpha("grey90",0.2)) %>%
-        column_spec(1:(d + u + v + 3), extra_css = "border-left: 2px solid;", width = "100px") %>%
-        column_spec(d + u + v + 3, extra_css = "border-right: 2px solid;") %>%
+        column_spec(1:(d + u + v + 3 + 1), extra_css = "border-left: 2px solid;", width = "100px") %>%
+        column_spec(d + u + v + 3 + 1, extra_css = "border-right: 2px solid;") %>%
         add_header_above(cn, extra_css = border_string, color = "black", 
                          background = alpha("white",0.2))
     })
@@ -885,6 +978,7 @@ server <- function(input, output, session) {
   output$catOutput <- renderText({
     cat_output()
   })
+  
   
   output$outputTable <- renderText({
     choice <- input$choice
@@ -933,6 +1027,8 @@ server <- function(input, output, session) {
     
     else if (choice == "Continuous Covariates Parameters") {
       output$ContTables <- renderUI({
+        if (is.null(selected_continuous_covariates)) return(NULL)
+        
         uu = c("mu","sigma")
         uu1 = c("Means","Covariance Matrices")
         ui_elements <- list()
@@ -979,6 +1075,8 @@ server <- function(input, output, session) {
     
     else if (choice == "Categorical Covariates Parameters") {
       output$CatTables <- renderUI({
+        if (is.null(selected_categorical_covariates)) return(NULL)
+        
         ui_elements <- list()
         for (var in 1:length(V)) {
           ui_elements <- append(ui_elements, list(
@@ -1001,6 +1099,8 @@ server <- function(input, output, session) {
     
     else if (choice == "Ising Model") {
       output$NuuTables <- renderUI({
+        if (is.null(selected_binary_dependent_covariates)) return(NULL)
+        
         ui_elements <- list()
         ui_elements <- append(ui_elements, list(
             HTML(paste0(
@@ -1019,6 +1119,7 @@ server <- function(input, output, session) {
       })
       
       output$IntPlot <- renderUI({
+        if (is.null(selected_binary_dependent_covariates)) return(NULL)
         ui_elements <- list()
         ui_elements <- append(ui_elements, list(
           HTML(paste0(
@@ -1050,7 +1151,7 @@ server <- function(input, output, session) {
   output$tablemu <- renderText({
     if (input$choice == "Continuous Covariates Parameters") {
       mu <- data.frame(matrix(ncol = 0,nrow = dim(U)[2]))
-      mu$Variable <- paste0("U",1:dim(U)[2])
+      mu$Variable <- names(fitting$params$mu[,,1])
       for(c in 1:C){
         coln <- paste0("mu","_",c)
         mu[[coln]] = signif(fitting$params$mu[,,c], digits = 4)
@@ -1095,9 +1196,11 @@ server <- function(input, output, session) {
   output$tablesigma <- renderText({
     if (input$choice == "Continuous Covariates Parameters") {
       sigma <- data.frame(matrix(ncol = 0,nrow = dim(U)[2]))
-      sigma$Variable <- paste0("U",1:dim(U)[2])
+      var_names <- names(fitting$params$mu[,,1])
+      sigma$Variable <- var_names
       for(c in 1:C){
-        sigma <- cbind(sigma,signif(fitting$params$sigma[,,c],digits = 4),paste0("U",1:dim(U)[2]))
+        sigma <- cbind(sigma,signif(fitting$params$sigma[,,c],digits = 4),
+                       names(fitting$params$mu[,,c]))
       }
       sigma <- sigma[,-ncol(sigma)]
       sig_vec <- paste0("\u03A3",pedix[1:C])
@@ -1110,34 +1213,38 @@ server <- function(input, output, session) {
         vec2 <- c(vec2," ", rep(sig_vec[i],dim(U)[2]) )
       }
       colnames(sigma) <- vec
-      tt <- data.frame(matrix(  rep(c("Variables",paste0("U",1:dim(U)[2])),C) ,ncol = dim(U)[2]*C + C,
+      tt <- data.frame(matrix(  rep(c("Variables",
+                                var_names),C) ,ncol = dim(U)[2]*C + C,
                                 nrow = 1)  )
       colnames(tt) <- vec
       sigma2 <- rbind(tt,sigma)
       sigma1 <- as.matrix(sigma2)
       colnames(sigma2) <- NULL
+      rownames(sigma2) <- NULL
+      step_size <- dim(U)[2] - 1
       kable_sigma <- sigma2 %>% kbl(align = c("c","c","c","c")) %>%
         kable_styling(font_size = 20) %>% column_spec(seq(1,dim(U)[2]*C + C,dim(U)[2]+1), color = "black",
-                                                      background = alpha("grey",0.2), bold = TRUE)  %>%
-        column_spec(2:3, color = "black",
+                                  background = alpha("grey",0.2), bold = TRUE)  %>%
+        column_spec(2:(2+step_size), color = "black",
                     background = my_colors[1]) %>%
-        column_spec(5:6, color = "black",
+        column_spec((4+step_size):(4+2*step_size), color = "black",
                     background = my_colors[2])
       
       if(C == 3 | C == 4 | C == 5 | C == 6){
-        kable_sigma <- kable_sigma %>% column_spec(8:9, color = "black",
-                                                   background = my_colors[3])
+        kable_sigma <- kable_sigma %>% column_spec((6+2*step_size):(6+3*step_size),
+                                      color = "black",
+                                      background = my_colors[3])
       }
       if(C == 4 | C == 5 | C == 6){
-        kable_sigma <- kable_sigma %>% column_spec(11:12, color = "black",
+        kable_sigma <- kable_sigma %>% column_spec((8+3*step_size):(8+4*step_size), color = "black",
                                                    background = my_colors[4])
       }
       if(C == 5 | C == 6){
-        kable_sigma <- kable_sigma %>% column_spec(14:15, color = "black",
+        kable_sigma <- kable_sigma %>% column_spec((10+4*step_size):(10+5*step_size), color = "black",
                                                    background = my_colors[5])
       }
       if(C == 6){
-        kable_sigma <- kable_sigma %>% column_spec(17:18, color = "black",
+        kable_sigma <- kable_sigma %>% column_spec((12+5*step_size):(12+6*step_size), color = "black",
                                                    background = my_colors[6])
       }
       
@@ -1151,46 +1258,12 @@ server <- function(input, output, session) {
     }
   })
   
-  output$plotclust <- renderPlot({
-    if (input$choice == "Continuous Covariates Parameters") {
-      ggplot(data = data, aes(x = x2, y = x1, color = factor(mclust::map(fitting$z)))) +
-        geom_point(shape = 16, size = 2) +
-        scale_color_manual(name = 'Cluster',values = c("blue", "green", 
-                                                             "deeppink")) +
-                                                               labs(x = "U2", y = "U1",title = "Clusters") +
-        theme_bw() +
-        theme(legend.position = "none",axis.text.x = element_text(size = 12,face = "bold"
-        ),
-        plot.title = element_text(size = 16),
-        axis.title = element_text(size = 12),
-        axis.text.y = element_text(size = 12,face = "bold", hjust = 1.5))
-    }
-  })
-  
-  
-  
-  output$plotclust <- renderPlot({
-    if (input$choice == "Continuous Covariates Parameters") {
-      ggplot(data = mydata, aes(x = x2, y = x1, color = factor(mclust::map(fitting$z)))) +
-        geom_point(shape = 16, size = 2) +
-        scale_color_manual(name = 'Cluster',values = c("blue", "green", 
-                                                       "deeppink")) +
-        labs(x = "U2", y = "U1",title = "Clusters") +
-        theme_bw() +
-        theme(legend.position = "none",axis.text.x = element_text(size = 12,face = "bold"
-                                                                  ),
-              plot.title = element_text(size = 16),
-              axis.title = element_text(size = 12),
-              axis.text.y = element_text(size = 12,face = "bold", hjust = 1.5))
-    }
-  })
-  
   #--------------------------CATEGORICAL COVARIATES------------------------------
   output$tablelam1 <- renderText({
     if (input$choice == "Categorical Covariates Parameters") {
     V1 <- V[[1]]
     fir <- data.frame(matrix(ncol = 0,nrow = dim(V1)[2]))
-    fir$Category <- 1:dim(V1)[2]
+    fir$Category <- sub(".*\\.", "", colnames(V1))
     fir1 <- data.frame(cbind(lambda_11 =  signif(fitting$params$lambda[[1]][,,1],digits = 4),
                             lambda_12 = signif(fitting$params$lambda[[1]][,,2],digits = 4)) )
     if(C == 3 | C == 4 | C == 5 | C == 6){
@@ -1210,6 +1283,7 @@ server <- function(input, output, session) {
     colnames(fir) <- c("Category", paste0("\u03BB",pedix[1], pedix[1:C]) )
     fir1 <- as.matrix(fir)
     colnames(fir1) <- NULL
+    rownames(fir1) <- NULL
     kable_fir1 <- fir1 %>% kbl(align = c("c","c","c","c","c")) %>%
       kable_styling(font_size = 20) %>% 
      column_spec(1, color = "black",
@@ -1250,7 +1324,7 @@ server <- function(input, output, session) {
     if (input$choice == "Categorical Covariates Parameters") {
       V2 <- V[[2]]
       sec <- data.frame(matrix(ncol = 0,nrow = dim(V2)[2]))
-      sec$Category <- 1:dim(V2)[2]
+      sec$Category <- sub(".*\\.", "", colnames(V2))
       sec1 <- data.frame(cbind(lambda_21 = 
                                 signif(fitting$params$lambda[[2]][,,1], digits = 4),
                               lambda_22 = signif(fitting$params$lambda[[2]][,,2], digits = 4) ) )
@@ -1270,6 +1344,7 @@ server <- function(input, output, session) {
       colnames(sec) <- c("Category", paste0("\u03BB",pedix[2], pedix[1:C]) )
       sec1 <- as.matrix(sec)
       colnames(sec1) <- NULL
+      rownames(sec1) <- NULL
       kable_sec1 <- sec1 %>% kbl(align = c("c","c","c","c")) %>%
         kable_styling(font_size = 20) %>%
         column_spec(1, color = "black",
@@ -1381,10 +1456,7 @@ server <- function(input, output, session) {
                  background = alpha("grey", 0.3)) %>%
         column_spec(1, color = "black", bold = TRUE) %>%
         column_spec(seq(1,5), border_right = "2px solid black", border_left = "2px solid black") %>%
-        row_spec(seq(1, dim(U)[2] + dim(D)[2] +
-                       ifelse(length(V) >= 1, dim(V[[1]])[2] - 1, 0) +
-                       ifelse(length(V) >= 2, dim(V[[2]])[2] - 1, 0) +
-                       ifelse(length(V) >= 3, dim(V[[3]])[2] - 1, 0)), 
+        row_spec(seq(1, nrow(summary(fitting$params$models[[1]])$coefficients)), 
                  extra_css = "border-bottom: 2px solid;") %>%
         add_header_above(c("Variables",colnames(fix1)), extra_css = border_string) 
     }
@@ -1406,10 +1478,7 @@ server <- function(input, output, session) {
                  background = alpha("grey", 0.3)) %>%
         column_spec(1, color = "black", bold = TRUE) %>%
         column_spec(seq(1,5), border_right = "2px solid black", border_left = "2px solid black") %>%
-        row_spec(seq(1,dim(U)[2] + dim(D)[2] +
-                       ifelse(length(V) >= 1, dim(V[[1]])[2] - 1, 0) +
-                       ifelse(length(V) >= 2, dim(V[[2]])[2] - 1, 0) +
-                       ifelse(length(V) >= 3, dim(V[[3]])[2] - 1, 0)), extra_css = "border-bottom: 2px solid;")  %>%
+        row_spec(seq(1, nrow(summary(fitting$params$models[[1]])$coefficients)), extra_css = "border-bottom: 2px solid;")  %>%
         add_header_above(c("Variables",colnames(fix1)), extra_css = border_string) 
     }
   })
@@ -1430,10 +1499,7 @@ server <- function(input, output, session) {
                  background = alpha("grey", 0.3)) %>%
         column_spec(1, color = "black", bold = TRUE) %>%
         column_spec(seq(1,5), border_right = "2px solid black", border_left = "2px solid black") %>%
-        row_spec(seq(1,dim(U)[2] + dim(D)[2] +
-                       ifelse(length(V) >= 1, dim(V[[1]])[2] - 1, 0) +
-                       ifelse(length(V) >= 2, dim(V[[2]])[2] - 1, 0) +
-                       ifelse(length(V) >= 3, dim(V[[3]])[2] - 1, 0)), extra_css = "border-bottom: 2px solid;") %>%
+        row_spec(seq(1, nrow(summary(fitting$params$models[[1]])$coefficients)), extra_css = "border-bottom: 2px solid;") %>%
         add_header_above(c("Variables",colnames(fix1)), extra_css = border_string) 
     }
   })
