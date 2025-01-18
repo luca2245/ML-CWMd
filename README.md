@@ -44,29 +44,29 @@ p((\mathbf{x}, \mathbf{y})| \boldsymbol{\theta}) = \sum_{c=1}^{C} p(\mathbf{y}|\
 ## Getting Started
 
 ### Run the Model Locally
-You can test the model directly in R using the script **`run_algorithm.R`**. Example datasets are provided in the "Example Datasets" folder, featuring the two distinct data-generating processes (DGPs) considered in the paper:
+You can test the model directly in R using the script `run_algorithm.R`. Example datasets are provided in the "Example Datasets" folder, featuring the two distinct data-generating processes (DGPs) analyzed in the paper's simulations:
 
-- **`data1.csv`**: Three latent clusters
-- **`data2.csv`**: Two latent clusters
+- `data1.csv`: Three latent clusters
+- `data2.csv`: Two latent clusters
 
 #### Part 1: Quick Testing with Provided Datasets
 1. Choose a dataset and initialize the model with:
    - **Random initialization**, or
    - **K-means initialization**
-2. Specify the number of latent clusters.
-3. Evaluate the prediction performance using the corresponding test datasets:
-   - **`test_data1.csv`** for `data1.csv`
-   - **`test_data2.csv`** for `data2.csv`
+2. Run the model with a fixed number of latent clusters.
+3. Get predictions using the corresponding test datasets:
+   - `test_data1.csv` for `data1.csv`
+   - `test_data2.csv` for `data2.csv`
 
 #### Part 2: Full Cluster Selection Procedure
 Follow the complete procedure outlined in the paper to identify the optimal number of latent clusters:
 
-1. **Define a Range for `C`**: Specify the range of possible cluster values.
-2. **Run the Algorithm for Each `C`**:
+1. **Define a Range for** `C`: Specify the range of possible cluster values.
+2. **Run the Algorithm for Each** `C`:
    - For each value of `C`, run the algorithm 30 times with random initialization and select the iteration with the highest log-likelihood.
    - If all random initializations fail, switch to k-means initialization.
 3. **Compute BIC**: Calculate the Bayesian Information Criterion (BIC) for the best iteration of each `C`.
-4. **Choose the Optimal `C`**: Select the number of clusters corresponding to the lowest BIC value.
+4. **Choose the Optimal** `C`: Select the number of clusters corresponding to the lowest BIC value.
 
 ### Explore the Model with a Shiny App
 A **Shiny app** is available to test the ML-CWMd model, visualize results, and generate predictions. Access the app here: [https://mcdhmq-luca-caldera.shinyapps.io/app-ml-cwmd/](https://mcdhmq-luca-caldera.shinyapps.io/app-ml-cwmd/). You can use the example datasets provided in the "Example Datasets" folder to test the model within the app.
