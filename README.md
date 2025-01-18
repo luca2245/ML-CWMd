@@ -12,13 +12,12 @@ It is specially designed for complex data scenarios involving:
 ## Model Overview
 
 ### Key Components
-The model works with:
+The model operates on the following key components:
 
 - **U**: A $p$-dimensional vector of continuous variables
 - **V**: A $q$-dimensional vector of categorical covariates
 - **D**: An $h$-dimensional vector of dichotomous covariates, which may exhibit dependence
-
-Together, these covariates form $\mathbf{X} = (\mathbf{U}, \mathbf{V}, \mathbf{D})$, and the response variable $Y \in \mathbb{R}^{(p + q + h)} \times \{0,1\}$. The data space, $\boldsymbol{\Omega}$, is assumed to consist of $C$ latent clusters: $\boldsymbol{\Omega}_1, \dots, \boldsymbol{\Omega}_C$.
+- **X** = (**U**,**V**,**D**) and Y (response variable) $\in$ $\mathbb{R}^{(p + q + h)}$ × {0,1} defined in a finite space $\boldsymbol{\Omega}$ which is assumed to be divided into $C$ clusters denoted as $\boldsymbol{\Omega}_1,\dots, \boldsymbol{\Omega}_C$
 
 ### Hierarchical Structure
 The model incorporates a two-level hierarchy:
@@ -27,7 +26,7 @@ The model incorporates a two-level hierarchy:
 2. **Second Level**: Groups $j$, for $j = 1, \dots, J$
 
 ### Joint Probability Across Clusters
-The model estimates the joint probability as follows:
+The joint probability distribution is modeled as:
 
 ```math
 p((\mathbf{x}, \mathbf{y})| \boldsymbol{\theta}) = \sum_{c=1}^{C} p(\mathbf{y}|\mathbf{x}, \boldsymbol{\xi}_{c}) \phi(\mathbf{u}| \boldsymbol{\mu}_{c}, \boldsymbol{\Sigma}_c) \psi(\mathbf{v}|\boldsymbol{\lambda}_{c}) \zeta(\mathbf{d}| \boldsymbol{\Gamma}_c, \boldsymbol{\nu}_c) w_{c}
@@ -37,7 +36,7 @@ p((\mathbf{x}, \mathbf{y})| \boldsymbol{\theta}) = \sum_{c=1}^{C} p(\mathbf{y}|\
 - **$w_c$**: Proportion of observations in cluster $c$
 - **$\phi(\cdot| \boldsymbol{\mu}_c, \boldsymbol{\Sigma}_c)$**: Multivariate normal density with cluster-specific means ($\boldsymbol{\mu}_c$) and covariances ($\boldsymbol{\Sigma}_c$)
 - **$\psi(\cdot| \boldsymbol{\lambda}_c)$**: Independent multinomial distributions with cluster-specific parameters ($\boldsymbol{\lambda}_c$)
-- **$\zeta(\cdot| \boldsymbol{\Gamma}_c, \boldsymbol{\nu}_c)$**: Ising model with cluster-specific thresholds ($\boldsymbol{\nu}_c$) and interactions ($\boldsymbol{\Gamma}_c$)
+- **$\zeta(\cdot| \boldsymbol{\Gamma}_c, \boldsymbol{\nu}_c)$**: Ising model with cluster-specific thresholds parameters ($\boldsymbol{\nu}_c$) and interactions parameters ($\boldsymbol{\Gamma}_c$)
 
 ---
 
