@@ -1,6 +1,6 @@
 # ML-CWMd
 
-In this repository, you'll find an R implementation of ML-CWMd, a novel methodology that integrates and extends cluster-weighted models (CWM) with logistic mixed-effects models (GLMM). The ML-CWMd is able to identify latent subpopulations, capture hospital-specific effects, and manage the conditional dependencies resulting from dichotomous covariates, incorporating the Ising model within the CWM framework. Additionally, it properly accounts for the dependencies introduced by the nested data structure. 
+In this repository, you'll find an R implementation of ML-CWMd, a novel methodology that integrates and extends cluster-weighted models (CWM) with logistic mixed-effects models (GLMM). The ML-CWMd is able to identify latent subpopulations, capture groups-specific effects, and manage the conditional dependencies resulting from dichotomous covariates, incorporating the Ising model within the CWM framework. Additionally, it properly accounts for the dependencies introduced by the nested data structure. 
 
 It is specially designed for complex data scenarios involving:
 
