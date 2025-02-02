@@ -17,6 +17,7 @@ source("Functions/EM-algorithm.R")
 source("Functions/BIC_calculation.R")
 source("Functions/table_BIC_comparison.R")
 source("Functions/Predictions.R")
+source("Functions/params_visualization.R")
  
 # INPUT:
 
@@ -37,11 +38,18 @@ source("Functions/Predictions.R")
 
 # max_it and tol: max_it and tolearnce for stopping the EM-algorithm
 
-# Load simulated dataset with C = 3
+# Load simulated dataset with C = 3 (data1.csv)
+# data2.csv for C = 2
 data = read.csv( "Example Datasets/data1.csv" )
+
+data_proc <- process_data(data)
+U <- data_proc$U
+V <- data_proc$V
+D <- data_proc$D
 
 # Set number of clusters
 C = 3
+#C = 2
 
 # Run the algorithm with N completely random initializations
 N <- 25
@@ -139,7 +147,6 @@ log_ll <- if_else(log_ll == 0, -Inf, log_ll)
 fitting <- fitting_rec[[which.max(log_ll)]]
 fitting$bic
 
-
 # View Log-Likelihood trend
 ggplot(data = data.frame(log_l = fitting$log_l[2:length(fitting$log_l)], iteration = 1:(length(fitting$log_l)-1)), 
        aes(x = iteration, y = log_l)) + 
@@ -155,6 +162,33 @@ test_data = read.csv( "Example Datasets/test_data1.csv" )
 y_pred <- predict_MLCWMd(fitting, test_data, C, new_level = FALSE)
 
 table_Pred(y_pred, test_data, fitting)
+
+# Visualize Parameters
+
+# Continuous covariates
+visual_mu_params(fitting)
+visual_sigma_params(fitting)
+
+# Categorical covariates
+visual_lambda_params(fitting)
+visual_nu_params(fitting)
+
+# Dichotomous dependent covariates
+thr_plots <- visual_thr_params(fitting)
+thr_plots[[1]]
+thr_plots[[2]]
+thr_plots[[3]] # only if C = 3
+
+# Fixed and random effects
+fixef_plots <- visual_fixef_params(fitting)
+fixef_plots[[1]]
+fixef_plots[[2]]
+fixef_plots[[3]] # only if C = 3
+
+ranef_plots <- visual_ranef_params(fitting)
+ranef_plots[[1]]
+ranef_plots[[2]]
+ranef_plots[[3]] # only if C = 3
 
 #--------------------Complete Procedure Described in the paper------------------
 
@@ -271,7 +305,7 @@ for (k in 1:length(possible_C_values)) {
 table_BIC(BIC_vector, possible_C_values)
 
 # Best Fit
-best_fit <- saved_fitting[[3]]
+best_fit <- saved_fitting[[C]] 
 best_fit$bic
 
 # View Log-Likelihood trend
@@ -287,6 +321,34 @@ ggplot(data = data.frame(log_l = fitting$log_l[2:length(best_fit$log_l)],
 # Get Predictions for a test data
 # Load Test data
 test_data = read.csv( "Example Datasets/test_data1.csv" )
-y_pred <- predict_MLCWMd(fitting, test_data, C, new_level = FALSE)
+y_pred <- predict_MLCWMd(best_fit, test_data, C, new_level = FALSE)
 
-table_Pred(y_pred, test_data, fitting)
+table_Pred(y_pred, test_data, best_fit)
+
+# Visualize Parameters 
+
+# Continuous covariates
+visual_mu_params(best_fit)
+visual_sigma_params(best_fit)
+
+# Categorical covariates
+visual_lambda_params(best_fit)
+visual_nu_params(best_fit)
+
+# Dichotomous dependent covariates
+thr_plots <- visual_thr_params(best_fit)
+thr_plots[[1]]
+thr_plots[[2]]
+thr_plots[[3]] # only if C = 3
+
+# Fixed and random effects
+fixef_plots <- visual_fixef_params(best_fit)
+fixef_plots[[1]]
+fixef_plots[[2]]
+fixef_plots[[3]] # only if C = 3
+
+ranef_plots <- visual_ranef_params(best_fit)
+ranef_plots[[1]]
+ranef_plots[[2]]
+ranef_plots[[3]] # only if C = 3
+
